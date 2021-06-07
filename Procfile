@@ -1,1 +1,1 @@
-worker: python heroku_test_asdfasdf.py
+worker: python heroku_test.py
