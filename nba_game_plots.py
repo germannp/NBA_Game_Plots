@@ -235,4 +235,4 @@ if __name__ == "__main__":
     while True:
         for date_ in [date.today() + timedelta(days=i) for i in [-2, -1, 0]]:
             tweet_games_of_day(date_)
-        time.sleep(arguments["--interval"] * 60 * 60)
+        time.sleep(int(arguments["--interval"]) * 60 * 60)
