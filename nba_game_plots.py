@@ -1,15 +1,17 @@
 """Tweet plots and stats of NBA games.
 
 Usage:
-  nba_game_plots.py
-  nba_game_plots.py --date 2021-05-22
   nba_game_plots.py (-h | --help)
+  nba_game_plots.py --date 2021-05-22
+  nba_game_plots.py --interval 4
 
 Options:
-  -h --help      Show this screen.
-  --date=<date>  Date to plot games of [default: 2021-05-22].
+  -h --help           Show this screen.
+  --date=<date>       ISO-formated date to tweet about games of.
+  --interval=<hours>  Check and tweet new games of today, yesterday, and the day before yesterday.
 """
-from datetime import date
+from datetime import date, timedelta
+import time
 
 from docopt import docopt
 import matplotlib.pyplot as plt
@@ -22,8 +24,18 @@ from basketball_reference_web_scraper import client
 from basketball_reference_web_scraper.data import Location
 from basketball_reference_web_scraper.data import TEAM_TO_TEAM_ABBREVIATION as TEAM2ABRV
 
-from credentials import *
 
+# Use credentials.py locally and env variables in the cloud
+try:
+    from credentials import API_KEY, API_SECRET_KEY, ACCESS_TOKEN, ACCESS_TOKEN_SECRET
+
+except ModuleNotFoundError:
+    from os import environ
+
+    API_KEY = environ['API_KEY']
+    API_SECRET_KEY = environ['API_SECRET_KEY']
+    ACCESS_TOKEN = environ['ACCESS_TOKEN']
+    ACCESS_TOKEN_SECRET = environ['ACCESS_TOKEN_SECRET']
 
 auth = tweepy.OAuthHandler(API_KEY, API_SECRET_KEY)
 auth.set_access_token(ACCESS_TOKEN, ACCESS_TOKEN_SECRET)
@@ -70,7 +82,7 @@ def tweet_games_of_day(date=date.today()):
         )
 
         if API.search(f"from:{API.me().screen_name} '{game_status}'"):
-            print(f"{game_status[:-2]} already tweeted")
+            print(f"{game_status[:-1]} already tweeted")
             continue
 
         # Game stats
@@ -213,4 +225,14 @@ def tweet_games_of_day(date=date.today()):
 
 if __name__ == "__main__":
     arguments = docopt(__doc__)
-    tweet_games_of_day(date.fromisoformat(arguments["--date"]))
+
+    if arguments["--date"]:
+        tweet_games_of_day(date.fromisoformat(arguments["--date"]))
+
+    if not arguments["--interval"]:
+        exit()
+
+    while True:
+        for date_ in [date.today() + timedelta(days=i) for i in [-2, -1, 0]]:
+            tweet_games_of_day(date_)
+        time.sleep(arguments["--interval"] * 60 * 60)
