@@ -87,7 +87,9 @@ def tweet_games_of_day(date=date.today()):
             date,
         )
 
-        if API.search(f"from:{API.me().screen_name} '{game_status}'") != []:
+        if API.search(f"from:{API.me().screen_name} '{game_status}'"):
+            # This is not waterproof: It takes ~20s until a new tweet is found. If the app
+            # is restarted meanwhilte, it will tweet again 🤷
             print(f"{game_status[:-1]} already tweeted")
             continue
 
