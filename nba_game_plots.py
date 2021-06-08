@@ -8,7 +8,7 @@ Usage:
 Options:
   -h --help           Show this screen.
   --date=<date>       ISO-formated date to tweet about games of.
-  --interval=<hours>  Check and tweet new games of today, yesterday, and the day before yesterday.
+  --interval=<hours>  Regularly tweet new games of today, yesterday, and the day before yesterday.
 """
 from datetime import date, timedelta
 import time
