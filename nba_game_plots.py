@@ -88,8 +88,8 @@ def tweet_games_of_day(date=date.today()):
         )
 
         if API.search(f"from:{API.me().screen_name} '{game_status}'"):
-            # This is not waterproof: It takes ~20s until a new tweet is found. If the app
-            # is restarted meanwhilte, it will tweet again 🤷
+            # This is not waterproof: It takes ~20s until a new tweet can be found. If the app is
+            # restarted meanwhile (e.g. right after crashing on Heroku), it will tweet again 🤷
             print(f"{game_status[:-1]} already tweeted")
             continue
 
@@ -240,6 +240,8 @@ if __name__ == "__main__":
     if not arguments["--interval"]:
         exit()
 
+    # Scheduling this job might be cleaner, but even the free Heroku Scheduler requires
+    # credit card information and I'd rather avoid surprises 🤷
     while True:
         for date_ in [date.today() + timedelta(days=i) for i in [-2, -1, 0]]:
             tweet_games_of_day(date_)
