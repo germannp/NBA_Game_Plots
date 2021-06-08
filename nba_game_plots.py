@@ -11,6 +11,7 @@ Options:
   --interval=<hours>  Check and tweet new games of today, yesterday, and the day before yesterday.
 """
 from datetime import date, timedelta
+import logging
 import time
 
 from docopt import docopt
@@ -23,19 +24,31 @@ import tweepy
 from basketball_reference_web_scraper import client
 from basketball_reference_web_scraper.data import Location
 from basketball_reference_web_scraper.data import TEAM_TO_TEAM_ABBREVIATION as TEAM2ABRV
+from basketball_reference_web_scraper.errors import InvalidDate
 
 
 # Use credentials.py locally and env variables in the cloud
 try:
     from credentials import API_KEY, API_SECRET_KEY, ACCESS_TOKEN, ACCESS_TOKEN_SECRET
 
+    logging.basicConfig(
+        level=logging.INFO,
+        format="Proc. %(process)d at %(asctime)s %(message)s",
+    )
+
 except ModuleNotFoundError:
     from os import environ
 
-    API_KEY = environ['API_KEY']
-    API_SECRET_KEY = environ['API_SECRET_KEY']
-    ACCESS_TOKEN = environ['ACCESS_TOKEN']
-    ACCESS_TOKEN_SECRET = environ['ACCESS_TOKEN_SECRET']
+    API_KEY = environ["API_KEY"]
+    API_SECRET_KEY = environ["API_SECRET_KEY"]
+    ACCESS_TOKEN = environ["ACCESS_TOKEN"]
+    ACCESS_TOKEN_SECRET = environ["ACCESS_TOKEN_SECRET"]
+
+    logging.basicConfig(
+        filename="nba_game_plots.log",
+        level=logging.INFO,
+        format="Proc. %(process)d at %(asctime)s %(message)s",
+    )
 
 auth = tweepy.OAuthHandler(API_KEY, API_SECRET_KEY)
 auth.set_access_token(ACCESS_TOKEN, ACCESS_TOKEN_SECRET)
@@ -43,11 +56,16 @@ API = tweepy.API(auth)
 
 
 def tweet_games_of_day(date=date.today()):
-    player_scores = pd.DataFrame(
-        client.player_box_scores(year=date.year, month=date.month, day=date.day)
-    )
+    try:
+        player_scores = pd.DataFrame(
+            client.player_box_scores(year=date.year, month=date.month, day=date.day)
+        )
+    except InvalidDate:
+        logging.info(f"Not yet {date} at basketball-reference.com")
+        return
+
     if not len(player_scores):
-        print(f"No games found on {date}")
+        logging.info(f"No games found on {date}")
         return
 
     player_scores["name"] = player_scores["name"].apply(
@@ -81,8 +99,8 @@ def tweet_games_of_day(date=date.today()):
             date,
         )
 
-        if API.search(f"from:{API.me().screen_name} '{game_status}'"):
-            print(f"{game_status[:-1]} already tweeted")
+        if API.search(f"from:{API.me().screen_name} '{game_status}'") != []:
+            logging.info(f"{game_status[:-1]} already tweeted")
             continue
 
         # Game stats
@@ -235,4 +253,4 @@ if __name__ == "__main__":
     while True:
         for date_ in [date.today() + timedelta(days=i) for i in [-2, -1, 0]]:
             tweet_games_of_day(date_)
-        time.sleep(int(arguments["--interval"]) * 60 * 60)
+        time.sleep(float(arguments["--interval"]) * 60 * 60)
