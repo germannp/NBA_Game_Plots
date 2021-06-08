@@ -9,4 +9,4 @@ Based on the data of [Basketball Reference](https://www.basketball-reference.com
 [Heroku](https://heroku.com/) following this [Tutorial](https://medium.datadriveninvestor.com/making-a-quote-tweeting-twitter-bot-with-python-tweepy-and-heroku-69a11cd3f47e)
 and tweeting as [@NBA_Game_Plots](https://twitter.com/NBA_Game_Plots) like this:
 
-![alt text](./Screenshot.png)
+![Screenshot of tweets](./Screenshot.png)
