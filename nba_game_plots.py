@@ -1,14 +1,14 @@
 """Tweet plots and stats of NBA games.
 
 Usage:
-  nba_game_plots.py (-h | --help)
+  nba_game_plots.py
   nba_game_plots.py --date 2021-05-22
-  nba_game_plots.py --interval 4
+  nba_game_plots.py -h | --help
 
 Options:
-  -h --help           Show this screen.
-  --date=<date>       ISO-formated date to tweet about games of.
-  --interval=<hours>  Check and tweet new games of today, yesterday, and the day before yesterday.
+  --date=<date>     ISO-formated date to tweet about games of. If no date is given,
+                    about the new games of the last three days is tweeted.
+  -h --help         Show this screen.
 """
 from datetime import date, timedelta
 import time
@@ -89,7 +89,7 @@ def tweet_games_of_day(date=date.today()):
 
         if API.search(f"from:{API.me().screen_name} '{game_status}'"):
             # This is not waterproof: It takes ~20s until a new tweet can be found. If the app is
-            # restarted meanwhile (e.g. right after crashing on Heroku), it will tweet again 🤷
+            # run meanwhile, it will tweet again 🤷
             print(f"{game_status[:-1]} already tweeted")
             continue
 
@@ -236,13 +236,7 @@ if __name__ == "__main__":
 
     if arguments["--date"]:
         tweet_games_of_day(date.fromisoformat(arguments["--date"]))
-
-    if not arguments["--interval"]:
         exit()
 
-    # Scheduling this job might be cleaner, but even the free Heroku Scheduler requires
-    # credit card information and I'd rather avoid surprises 🤷
-    while True:
-        for date_ in [date.today() + timedelta(days=i) for i in [-2, -1, 0]]:
-            tweet_games_of_day(date_)
-        time.sleep(float(arguments["--interval"]) * 60 * 60)
+    for date_ in [date.today() + timedelta(days=i) for i in [-2, -1, 0]]:
+        tweet_games_of_day(date_)
