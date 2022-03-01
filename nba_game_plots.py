@@ -23,6 +23,7 @@ from basketball_reference_scraper.constants import TEAM_TO_TEAM_ABBR as TEAM2ABB
 from basketball_reference_scraper.seasons import get_schedule
 from basketball_reference_scraper.pbp import get_pbp
 from basketball_reference_scraper.box_scores import get_box_scores
+from basketball_reference_scraper.injury_report import get_injury_report
 
 # Use credentials.py locally and env variables in the cloud
 try:
@@ -41,16 +42,19 @@ auth.set_access_token(ACCESS_TOKEN, ACCESS_TOKEN_SECRET)
 API = tweepy.API(auth)
 
 
-def tweet_game(
-        date="2022-02-27", away_team="Philadelphia 76ers", home_team="New York Knicks"
-    ):
+def tweet_game(date, away_team, home_team, injury_report):
     # Title
     away_abbr = TEAM2ABBR[away_team.upper()]
     home_abbr = TEAM2ABBR[home_team.upper()]
     play_by_play = get_pbp(date, away_abbr, home_abbr)
     play_by_play.columns = [
-        "quarter", "time_remaining", "away_action", "home_action", "away_score", "home_score"
-        ]
+        "quarter",
+        "time_remaining",
+        "away_action",
+        "home_action",
+        "away_score",
+        "home_score",
+    ]
     away_score = play_by_play["away_score"].max()
     home_score = play_by_play["home_score"].max()
     game_status = f"#{away_abbr}vs{home_abbr} {away_score}:{home_score} on {date}"
@@ -70,9 +74,7 @@ def tweet_game(
     )
     play_by_play["lead"] = play_by_play["away_score"] - play_by_play["home_score"]
     game_status += "Lead changes: {}\n".format(
-        (play_by_play["lead"].replace(0, np.nan).dropna() < 0)
-        .diff()
-        .sum()
+        (play_by_play["lead"].replace(0, np.nan).dropna() < 0).diff().sum()
     )
     game_status += "Largest lead: {}\n".format(
         play_by_play["lead"].abs().max(),
@@ -106,7 +108,7 @@ def tweet_game(
         home_lead.components.seconds,
     )
 
-    # Plot play_by_play over time
+    # Plot scores over time
     plt.figure(figsize=[5.05, 2.85])
     for team, score, score_column, color in [
         (away_team, away_score, "away_score", "#1d428a"),
@@ -140,7 +142,7 @@ def tweet_game(
     plt.tight_layout()
     plt.savefig("scores.png", transparent=False, dpi=300)
     media = API.media_upload("scores.png")
-    api_reply = API.update_status(game_status[:280], media_ids=[media.media_id])
+    api_reply = API.update_status(game_status[:279], media_ids=[media.media_id])
 
     # Team stats
     box_scores = get_box_scores(date, away_abbr, home_abbr)
@@ -174,17 +176,19 @@ def tweet_game(
         )
     )
     api_reply = API.update_status(
-        teams_status[:280], in_reply_to_status_id=api_reply.id_str
+        teams_status[:279], in_reply_to_status_id=api_reply.id_str
     )
 
     # Best individual stats
     stats = ["PTS", "TRB", "AST", "STL", "BLK"]
-    box_scores = pd.concat(box_scores.values()).query(
-        "PLAYER != 'Team Totals'"
-    ).set_index("PLAYER")
-    box_scores = box_scores[
-        ~box_scores["MP"].str.contains("Not")
-    ].astype({stat: int for stat in stats})
+    box_scores = (
+        pd.concat(box_scores.values())
+        .query("PLAYER != 'Team Totals'")
+        .set_index("PLAYER")
+    )
+    box_scores = box_scores[~box_scores["MP"].str.contains("Not")].astype(
+        {stat: int for stat in stats}
+    )
 
     def shorten(name):
         first, *last = name.split(" ")
@@ -204,7 +208,38 @@ def tweet_game(
             + "\n"
         )
     api_reply = API.update_status(
-        players_status[:280], in_reply_to_status_id=api_reply.id_str
+        players_status[:279], in_reply_to_status_id=api_reply.id_str
+    )
+
+    # Injury report
+    injury_status = ""
+    for team in [away_abbr, home_abbr]:
+        team_injuries = injury_report[
+            (injury_report["DATE"] <= pd.to_datetime(date))
+            & (injury_report["TEAM"] == team)
+        ]
+        if len(team_injuries):
+            injury_status += (
+                team
+                + ":\n"
+                + "\n".join(
+                    team_injuries.apply(
+                        lambda injury: " ".join(
+                            shorten(injury.PLAYER),
+                            injury.STATUS,
+                            injury.DATE.date(),
+                            injury.INJURY,
+                        ),
+                        axis=1,
+                    )
+                )
+                + "\n"
+            )
+    if not injury_status:
+        return
+
+    api_reply = API.update_status(
+        injury_status[:279], in_reply_to_status_id=api_reply.id_str
     )
 
 
@@ -222,7 +257,7 @@ if __name__ == "__main__":
             schedule = schedule.append(get_schedule(year, playoffs=playoffs).dropna())
         except ValueError:
             break  # No schedule available yet
-    
+
     if arguments["--date"]:
         games = schedule.query(f"DATE == '{date.date()}'")
     else:
@@ -232,5 +267,6 @@ if __name__ == "__main__":
         print(f"No games on {date.date()}")
         exit()
 
+    injury_report = get_injury_report()
     for game in games.itertuples():
-        tweet_game(game.DATE.date(), game.VISITOR, game.HOME)
+        tweet_game(game.DATE.date(), game.VISITOR, game.HOME, injury_report)
