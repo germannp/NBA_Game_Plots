@@ -10,8 +10,7 @@ Options:
                     about the new games of the last three days is tweeted.
   -h --help         Show this screen.
 """
-from datetime import date, timedelta
-import time
+from itertools import product
 
 from docopt import docopt
 import matplotlib.pyplot as plt
@@ -20,11 +19,10 @@ import pandas as pd
 import seaborn as sns
 import tweepy
 
-from basketball_reference_web_scraper import client
-from basketball_reference_web_scraper.data import Location
-from basketball_reference_web_scraper.data import TEAM_TO_TEAM_ABBREVIATION as TEAM2ABRV
-from basketball_reference_web_scraper.errors import InvalidDate
-
+from basketball_reference_scraper.constants import TEAM_TO_TEAM_ABBR as TEAM2ABBR
+from basketball_reference_scraper.seasons import get_schedule
+from basketball_reference_scraper.pbp import get_pbp
+from basketball_reference_scraper.box_scores import get_box_scores
 
 # Use credentials.py locally and env variables in the cloud
 try:
@@ -43,200 +41,196 @@ auth.set_access_token(ACCESS_TOKEN, ACCESS_TOKEN_SECRET)
 API = tweepy.API(auth)
 
 
-def tweet_games_of_day(date=date.today()):
-    try:
-        player_scores = pd.DataFrame(
-            client.player_box_scores(year=date.year, month=date.month, day=date.day)
-        )
-    except InvalidDate:
-        print(f"Not yet {date} at basketball-reference.com")
+def tweet_game(
+        date="2022-02-27", away_team="Philadelphia 76ers", home_team="New York Knicks"
+    ):
+    # Title
+    away_abbr = TEAM2ABBR[away_team.upper()]
+    home_abbr = TEAM2ABBR[home_team.upper()]
+    play_by_play = get_pbp(date, away_abbr, home_abbr)
+    play_by_play.columns = [
+        "quarter", "time_remaining", "away_action", "home_action", "away_score", "home_score"
+        ]
+    away_score = play_by_play["away_score"].max()
+    home_score = play_by_play["home_score"].max()
+    game_status = f"#{away_abbr}vs{home_abbr} {away_score}:{home_score} on {date}"
+
+    if API.search(f"from:{API.me().screen_name} '{game_status}'"):
+        # This is not waterproof: It takes ~20s until a new tweet can be found. If the app is
+        # run meanwhile, it will tweet again 🤷
+        print(f"{game_status} already tweeted")
         return
 
-    if not len(player_scores):
-        print(f"No games found on {date}")
-        return
-
-    player_scores["name"] = player_scores["name"].apply(
-        lambda name: name[0] + ". " + name.split(" ")[-1]
+    # Game stats
+    game_status += "\nTies: {}\n".format(
+        play_by_play.drop_duplicates(subset=["away_score", "home_score"])
+        .query("away_score > 0")
+        .eval("away_score == home_score")
+        .sum()
     )
-    player_scores["home_team"] = player_scores.apply(
-        lambda player: player["team"]
-        if player["location"] == Location.HOME
-        else player["opponent"],
-        axis=1,
+    play_by_play["lead"] = play_by_play["away_score"] - play_by_play["home_score"]
+    game_status += "Lead changes: {}\n".format(
+        (play_by_play["lead"].replace(0, np.nan).dropna() < 0)
+        .diff()
+        .sum()
     )
-    player_scores["points"] = player_scores.eval(
-        "made_free_throws + made_field_goals * 2 + made_three_point_field_goals"
-    )
-    player_scores["rebounds"] = player_scores.eval(
-        "defensive_rebounds + offensive_rebounds"
+    game_status += "Largest lead: {}\n".format(
+        play_by_play["lead"].abs().max(),
     )
 
-    for home_team in player_scores["home_team"].unique():
-        game = player_scores[player_scores["home_team"] == home_team]
+    play_by_play["remaining_seconds_in_period"] = play_by_play["time_remaining"].apply(
+        lambda time: int(time.split(":")[0]) * 60 + float(time.split(":")[1])
+    )
+    play_by_play["time"] = (
+        np.minimum(play_by_play["remaining_seconds_in_period"].diff(), 0)
+        .cumsum()
+        .fillna(0)
+        / -60
+    )
+    play_by_play["duration"] = play_by_play["time"].diff().fillna(0)
 
-        # Title
-        away_team = next(team for team in game["team"] if team != home_team)
-        home_score = game[game["team"] == home_team]["points"].sum()
-        away_score = game[game["team"] == away_team]["points"].sum()
-        game_status = "#{}vs{} {}:{} on {}\n".format(
-            TEAM2ABRV[away_team],
-            TEAM2ABRV[home_team],
-            away_score,
-            home_score,
-            date,
+    away_lead = pd.to_timedelta(
+        play_by_play.query("away_score > home_score")["duration"].sum(), unit="min"
+    )
+    game_status += "{} led: ~{}:{:02d}\n".format(
+        away_abbr,
+        away_lead.components.minutes,
+        away_lead.components.seconds,
+    )
+    home_lead = pd.to_timedelta(
+        play_by_play.query("away_score < home_score")["duration"].sum(), unit="min"
+    )
+    game_status += "{} led: ~{}:{:02d}".format(
+        home_abbr,
+        home_lead.components.minutes,
+        home_lead.components.seconds,
+    )
+
+    # Plot play_by_play over time
+    plt.figure(figsize=[5.05, 2.85])
+    for team, score, score_column, color in [
+        (away_team, away_score, "away_score", "#1d428a"),
+        (home_team, home_score, "home_score", "#c8102e"),
+    ]:
+        plt.plot(
+            play_by_play["time"],
+            play_by_play[score_column],
+            label=team + ", " + str(score),
+            color=color,
         )
 
-        if API.search(f"from:{API.me().screen_name} '{game_status}'"):
-            # This is not waterproof: It takes ~20s until a new tweet can be found. If the app is
-            # run meanwhile, it will tweet again 🤷
-            print(f"{game_status[:-1]} already tweeted")
-            continue
+    pauses = [
+        pause
+        for pause in [12, 24, 36, 48, 53, 58, 63, 68, 73, 78, 83]
+        if pause < play_by_play["time"].max()
+    ]
+    pause_play_by_play = [
+        play_by_play.query(f"time < {pause}")[["home_score", "away_score"]].max().max()
+        for pause in pauses
+    ]
+    plt.vlines(pauses, 0, pause_play_by_play, colors="0.8", linestyles=":")
 
-        # Game stats
-        scores = pd.DataFrame(
-            client.play_by_play(
-                home_team=home_team, year=date.year, month=date.month, day=date.day
+    plt.title(date)
+    plt.legend(frameon=False)
+    plt.xlabel("Minutes")
+    plt.ylabel("Scores")
+    plt.xlim(left=0)
+    plt.ylim(bottom=0)
+    sns.despine()
+    plt.tight_layout()
+    plt.savefig("scores.png", transparent=False, dpi=300)
+    media = API.media_upload("scores.png")
+    api_reply = API.update_status(game_status[:280], media_ids=[media.media_id])
+
+    # Team stats
+    box_scores = get_box_scores(date, away_abbr, home_abbr)
+    away_totals = box_scores[away_abbr].iloc[-1]
+    home_totals = box_scores[home_abbr].iloc[-1]
+    teams_status = ""
+    for stat in ["FG", "3P", "FT"]:
+        teams_status += "{}: {} of {} / {} of {}\n".format(
+            stat,
+            away_totals[stat],
+            away_totals[stat + "A"],
+            home_totals[stat],
+            home_totals[stat + "A"],
+        )
+    teams_status += "DRB: {} of {} / {} of {}\n".format(
+        away_totals["DRB"],
+        int(away_totals["DRB"]) + int(away_totals["ORB"]),
+        home_totals["DRB"],
+        int(home_totals["DRB"]) + int(home_totals["ORB"]),
+    )
+    for stat in ["AST", "STL", "BLK", "TOV", "PF"]:
+        teams_status += "{}: {} / {}\n".format(
+            stat,
+            away_totals[stat],
+            home_totals[stat],
+        )
+    teams_status += (
+        "\nSource & more data: "
+        + "https://www.basketball-reference.com/boxscores/pbp/{}{:02d}{:02d}0{}.html".format(
+            date.year, date.month, date.day, TEAM2ABBR[home_team.upper()]
+        )
+    )
+    api_reply = API.update_status(
+        teams_status[:280], in_reply_to_status_id=api_reply.id_str
+    )
+
+    # Best individual stats
+    stats = ["PTS", "TRB", "AST", "STL", "BLK"]
+    box_scores = pd.concat(box_scores.values()).query(
+        "PLAYER != 'Team Totals'"
+    ).set_index("PLAYER")
+    box_scores = box_scores[
+        ~box_scores["MP"].str.contains("Not")
+    ].astype({stat: int for stat in stats})
+
+    def shorten(name):
+        first, *last = name.split(" ")
+        if len(first) > 2 and any(c for c in first if c.islower()):
+            first = first[0] + "."
+        return " ".join([first] + last)
+
+    players_status = ""
+    for stat in stats:
+        players_status += (
+            f"{stat}: "
+            + ", ".join(
+                box_scores.sort_values(stat, ascending=False)
+                .iloc[:3]
+                .apply(lambda player: f"{shorten(player.name)} {player[stat]}", axis=1)
             )
+            + "\n"
         )
-        game_status += "Ties: {}\n".format(
-            scores.drop_duplicates(subset=["away_score", "home_score"])
-            .query("away_score > 0")
-            .eval("away_score == home_score")
-            .sum()
-        )
-        game_status += "Lead changes: {}\n".format(
-            (scores.eval("away_score - home_score").replace(0, np.nan).dropna() < 0)
-            .diff()
-            .sum()
-        )
-        game_status += "Largest lead: {}\n".format(
-            scores.eval("away_score - home_score").abs().max(),
-        )
-
-        scores["time"] = (
-            np.minimum(scores["remaining_seconds_in_period"].diff(), 0)
-            .cumsum()
-            .fillna(0)
-            / -60
-        )
-        scores["duration"] = scores["time"].diff().fillna(0)
-
-        away_lead = pd.to_timedelta(
-            scores.query("away_score > home_score")["duration"].sum(), unit="min"
-        )
-        game_status += "{} led: ~{}:{:02d}\n".format(
-            TEAM2ABRV[scores["away_team"][0]],
-            away_lead.components.minutes,
-            away_lead.components.seconds,
-        )
-        home_lead = pd.to_timedelta(
-            scores.query("away_score < home_score")["duration"].sum(), unit="min"
-        )
-        game_status += "{} led: ~{}:{:02d}".format(
-            TEAM2ABRV[scores["home_team"][0]],
-            home_lead.components.minutes,
-            home_lead.components.seconds,
-        )
-
-        # Plot scores over time
-        plt.figure(figsize=[5.05, 2.85])
-        for location, color in {"away": "#1d428a", "home": "#c8102e"}.items():
-            team = scores[f"{location}_team"][0]
-            name = team.name.title().replace("_", " ")
-            score = scores[f"{location}_score"].max()
-            plt.plot(
-                scores["time"],
-                scores[f"{location}_score"],
-                label=name + ", " + str(score),
-                color=color,
-            )
-
-        pauses = [
-            pause
-            for pause in [12, 24, 36, 48, 53, 58, 63, 68, 73, 78, 83]
-            if pause < scores["time"].max()
-        ]
-        pause_scores = [
-            scores.query(f"time < {pause}")[["home_score", "away_score"]].max().max()
-            for pause in pauses
-        ]
-        plt.vlines(pauses, 0, pause_scores, colors="0.8", linestyles=":")
-
-        plt.title(date)
-        plt.legend(frameon=False)
-        plt.xlabel("Minutes")
-        plt.ylabel("Scores")
-        plt.xlim(left=0)
-        plt.ylim(bottom=0)
-        sns.despine()
-        plt.tight_layout()
-        plt.savefig("scores.png", transparent=False, dpi=300)
-        media = API.media_upload("scores.png")
-        api_reply = API.update_status(game_status[:280], media_ids=[media.media_id])
-
-        # Team stats
-        teams_status = ""
-        total = game.groupby(lambda index: game.loc[index, "location"].name).apply(sum)
-        for name, stat in {
-            "FG": "field_goals",
-            "3P": "three_point_field_goals",
-            "FT": "free_throws",
-        }.items():
-            teams_status += "{}: {} of {} / {} of {}\n".format(
-                name,
-                total[f"made_{stat}"]["AWAY"],
-                total[f"attempted_{stat}"]["AWAY"],
-                total[f"made_{stat}"]["HOME"],
-                total[f"attempted_{stat}"]["HOME"],
-            )
-        teams_status += "DRB: {} of {} / {} of {}\n".format(
-            total["defensive_rebounds"]["AWAY"],
-            total["defensive_rebounds"]["AWAY"] + total["offensive_rebounds"]["HOME"],
-            total["defensive_rebounds"]["HOME"],
-            total["defensive_rebounds"]["HOME"] + total["offensive_rebounds"]["AWAY"],
-        )
-        for name, stat in {
-            "AST": "assists",
-            "STL": "steals",
-            "BLK": "blocks",
-            "TOV": "turnovers",
-            "PF": "personal_fouls",
-        }.items():
-            teams_status += f"{name}: {total[stat]['AWAY']} / {total[stat]['HOME']}\n"
-        teams_status += (
-            "\nSource & more data: "
-            + "https://www.basketball-reference.com/boxscores/pbp/{}{:02d}{:02d}0{}.html".format(
-                date.year, date.month, date.day, TEAM2ABRV[home_team]
-            )
-        )
-        api_reply = API.update_status(
-            teams_status[:280], in_reply_to_status_id=api_reply.id_str
-        )
-
-        # Best individual stats
-        players_status = ""
-        for stat in ["points", "rebounds", "assists", "steals", "blocks"]:
-            players_status += (
-                f"{stat.title()}: "
-                + ", ".join(
-                    game.sort_values(stat, ascending=False)
-                    .apply(lambda player: f"{player['name']} {player[stat]}", axis=1)
-                    .iloc[:3]
-                )
-                + "\n"
-            )
-        api_reply = API.update_status(
-            players_status[:280], in_reply_to_status_id=api_reply.id_str
-        )
+    api_reply = API.update_status(
+        players_status[:280], in_reply_to_status_id=api_reply.id_str
+    )
 
 
 if __name__ == "__main__":
     arguments = docopt(__doc__)
 
     if arguments["--date"]:
-        tweet_games_of_day(date.fromisoformat(arguments["--date"]))
+        date = pd.to_datetime(arguments["--date"])
+    else:
+        date = pd.Timestamp.today()
+
+    schedule = pd.DataFrame()
+    for year, playoffs in product([date.year, date.year + 1], [False, True]):
+        try:
+            schedule = schedule.append(get_schedule(year, playoffs=playoffs).dropna())
+        except ValueError:
+            break  # No schedule available yet
+    
+    if arguments["--date"]:
+        games = schedule.query(f"DATE == '{date.date()}'")
+    else:
+        games = schedule[(date - pd.to_timedelta("2d")) <= schedule["DATE"]]
+
+    if not len(games):
+        print(f"No games on {date.date()}")
         exit()
 
-    for date_ in [date.today() + timedelta(days=i) for i in [-2, -1, 0]]:
-        tweet_games_of_day(date_)
+    for game in games.itertuples():
+        tweet_game(game.DATE.date(), game.VISITOR, game.HOME)
