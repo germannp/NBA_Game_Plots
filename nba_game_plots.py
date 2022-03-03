@@ -24,6 +24,7 @@ from basketball_reference_scraper.seasons import get_schedule
 from basketball_reference_scraper.pbp import get_pbp
 from basketball_reference_scraper.box_scores import get_box_scores
 from basketball_reference_scraper.injury_report import get_injury_report
+from basketball_reference_scraper.utils import remove_accents
 
 # Use credentials.py locally and env variables in the cloud
 try:
@@ -135,7 +136,7 @@ def tweet_game(date, away_team, home_team, injury_report):
     plt.title(date)
     plt.legend(frameon=False)
     plt.xlabel("Minutes")
-    plt.ylabel("Scores")
+    plt.ylabel("Points")
     plt.xlim(left=0)
     plt.ylim(bottom=0)
     sns.despine()
@@ -212,35 +213,40 @@ def tweet_game(date, away_team, home_team, injury_report):
     )
 
     # Injury report
-    injury_status = ""
+    injury_stati = []
     for team in [away_abbr, home_abbr]:
         team_injuries = injury_report[
             (injury_report["DATE"] <= pd.to_datetime(date))
             & (injury_report["TEAM"] == team)
         ]
         if len(team_injuries):
-            injury_status += (
+            injury_stati.append(
                 team
                 + ":\n"
                 + "\n".join(
                     team_injuries.apply(
                         lambda injury: " ".join(
-                            shorten(injury.PLAYER),
-                            injury.STATUS,
-                            injury.DATE.date(),
-                            injury.INJURY,
+                            [
+                                shorten(remove_accents(injury.PLAYER, team, date.year)),
+                                injury.STATUS,
+                                str(injury.DATE.date()),
+                                injury.INJURY,
+                            ]
                         ),
                         axis=1,
                     )
                 )
-                + "\n"
             )
-    if not injury_status:
+    if not injury_stati:
         return
 
-    api_reply = API.update_status(
-        injury_status[:279], in_reply_to_status_id=api_reply.id_str
-    )
+    if len(injury_stati) == 2 and len(injury_stati[0]) + len(injury_stati[1]) <= 278:
+        injury_stati = [injury_stati[0] + "\n" + injury_stati[1]]
+
+    for status in injury_stati:
+        api_reply = API.update_status(
+            status[:279], in_reply_to_status_id=api_reply.id_str
+        )
 
 
 if __name__ == "__main__":
