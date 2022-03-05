@@ -14,6 +14,7 @@ from itertools import product
 
 from docopt import docopt
 import matplotlib.pyplot as plt
+from matplotlib.patches import Arc, Circle, Rectangle
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -25,6 +26,7 @@ from basketball_reference_scraper.pbp import get_pbp
 from basketball_reference_scraper.box_scores import get_box_scores
 from basketball_reference_scraper.injury_report import get_injury_report
 from basketball_reference_scraper.utils import remove_accents
+from basketball_reference_scraper.shot_charts import get_shot_chart
 
 # Use credentials.py locally and env variables in the cloud
 try:
@@ -55,8 +57,8 @@ def tweet_game(game, injury_report):
     game_status = f"#{away_abbr}vs{home_abbr} {away_score}:{home_score} on {date}"
 
     if API.search(f"from:{API.me().screen_name} '{game_status}'"):
-        # This is not waterproof: It takes ~20s until a new tweet can be found. If the app is
-        # run meanwhile, it will tweet again 🤷
+        # This is not waterproof: It takes ~20s until a new tweet can be found. If the
+        # app is run meanwhile, it will tweet again 🤷
         print(f"{game_status} already tweeted")
         return
 
@@ -116,8 +118,8 @@ def tweet_game(game, injury_report):
     # Plot scores over time
     plt.figure(figsize=[5.05, 2.85])
     for team, score, score_column, color in [
-        (away_team, away_score, "away_score", "#1d428a"),
-        (home_team, home_score, "home_score", "#c8102e"),
+        (away_team, away_score, "away_score", blue := "#1d428a"),
+        (home_team, home_score, "home_score", red := "#c8102e"),
     ]:
         plt.plot(
             play_by_play["time"],
@@ -174,14 +176,79 @@ def tweet_game(game, injury_report):
             away_totals[stat],
             home_totals[stat],
         )
-    teams_status += (
-        "\nSource & more data: "
-        + "https://www.basketball-reference.com/boxscores/pbp/{}{:02d}{:02d}0{}.html".format(
-            date.year, date.month, date.day, TEAM2ABBR[home_team.upper()]
+
+    # Plot shot chart
+    shots = get_shot_chart(date, away_abbr, home_abbr)
+    shots[away_abbr]["TEAM"] = away_abbr
+    shots[home_abbr]["TEAM"] = home_abbr
+    shots = shots[away_abbr].append(shots[home_abbr])
+    shots["x"] = shots["x"].apply(lambda ft: float(ft[:-3]))
+    shots["y"] = shots["y"].apply(lambda ft: float(ft[:-3]))
+
+    # Unfortunately the coordinates suck, so we shift and scale them around to make sure
+    # all threes are from behind the ark.
+    left_corner = shots.query("VALUE == 3 and y < 14 and x < 25")["x"].max()
+    right_corner = shots.query("VALUE == 3 and y < 14 and x > 25")["x"].min()
+    if left_corner and right_corner:
+        shots["x"] = shots["x"] - left_corner
+        shots["x"] = shots["x"] / (right_corner - left_corner) * 44
+        shots["x"] = shots["x"] + 3
+    behind_ark = shots.query("VALUE == 3 and y > 14")
+    min_dist = np.sqrt((behind_ark["x"] - 25)**2 + (behind_ark["y"] - 5.25)**2).min()
+    shots["y"] = shots["y"] / min_dist * 23.75
+
+    plt.figure(figsize=[5.05, 2.85])
+    plt.title(f"{away_team} {away_score}:{home_score} {home_team}")
+    for make_miss, marker in [
+        ("MAKE", "o"),
+        ("MISS", "x"),
+    ]:
+        plt.scatter(
+            shots.query(f"TEAM == '{away_abbr}' and MAKE_MISS == '{make_miss}'")["y"],
+            shots.query(f"TEAM == '{away_abbr}' and MAKE_MISS == '{make_miss}'")["x"],
+            marker=marker,
+            c=blue,
         )
+        plt.scatter(
+            94
+            - shots.query(f"TEAM == '{home_abbr}' and MAKE_MISS == '{make_miss}'")["y"],
+            50
+            - shots.query(f"TEAM == '{home_abbr}' and MAKE_MISS == '{make_miss}'")["x"],
+            marker=marker,
+            c=red,
+        )
+
+    plt.gca().add_artist(Circle((47, 25), 6, fc="none", ec="k", lw=1))
+    plt.plot([47, 47], [0, 50], lw=1, c="k")
+
+    plt.gca().add_artist(Circle((5.25, 25), 1.5, fc="none", ec="k", lw=1))
+    plt.plot([0, 14], [3, 3], lw=1, c="k")
+    plt.plot([0, 14], [47, 47], lw=1, c="k")
+    plt.gca().add_artist(
+        Arc((5.25, 25), 47.5, 47.5, theta1=292, theta2=68, fc="none", lw=1)
     )
+    plt.gca().add_artist(Rectangle((0, 17), 19, 16, lw=1, ec="k", fill=False))
+
+    plt.gca().add_artist(Circle((88.75, 25), 1.5, fc="none", ec="k", lw=1))
+    plt.plot([80, 94], [3, 3], lw=1, c="k")
+    plt.plot([80, 94], [47, 47], lw=1, c="k")
+    plt.gca().add_artist(
+        Arc((88.75, 25), 47.5, 47.5, theta1=112, theta2=249, fc="none", lw=1)
+    )
+    plt.gca().add_artist(Rectangle((77, 17), 19, 16, lw=1, ec="k", fill=False))
+
+    plt.gca().set_aspect("equal")
+    plt.xlim(0, 94)
+    plt.ylim(0, 50)
+    plt.xticks([])
+    plt.yticks([])
+    plt.tight_layout()
+    plt.savefig("shots.png", transparent=False, dpi=300)
+    media = API.media_upload("shots.png")
     api_reply = API.update_status(
-        teams_status[:279], in_reply_to_status_id=api_reply.id_str
+        teams_status[:279],
+        media_ids=[media.media_id],
+        in_reply_to_status_id=api_reply.id_str,
     )
 
     # Best individual stats
@@ -251,6 +318,17 @@ def tweet_game(game, injury_report):
         api_reply = API.update_status(
             status[:279], in_reply_to_status_id=api_reply.id_str
         )
+
+    # Link to Basketball Reference
+    link_to_source = (
+        "\nSource & more data: "
+        + "https://www.basketball-reference.com/boxscores/pbp/{}{:02d}{:02d}0{}.html".format(
+            date.year, date.month, date.day, TEAM2ABBR[home_team.upper()]
+        )
+    )
+    api_reply = API.update_status(
+        link_to_source[:279], in_reply_to_status_id=api_reply.id_str
+    )
 
 
 if __name__ == "__main__":
