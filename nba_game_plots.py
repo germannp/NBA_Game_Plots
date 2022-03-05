@@ -43,21 +43,15 @@ auth.set_access_token(ACCESS_TOKEN, ACCESS_TOKEN_SECRET)
 API = tweepy.API(auth)
 
 
-def tweet_game(date, away_team, home_team, injury_report):
+def tweet_game(game, injury_report):
     # Title
+    date = game.DATE.date()
+    away_team = game.VISITOR
+    home_team = game.HOME
     away_abbr = TEAM2ABBR[away_team.upper()]
     home_abbr = TEAM2ABBR[home_team.upper()]
-    play_by_play = get_pbp(date, away_abbr, home_abbr)
-    play_by_play.columns = [
-        "quarter",
-        "time_remaining",
-        "away_action",
-        "home_action",
-        "away_score",
-        "home_score",
-    ]
-    away_score = play_by_play["away_score"].max()
-    home_score = play_by_play["home_score"].max()
+    away_score = int(game.VISITOR_PTS)
+    home_score = int(game.HOME_PTS)
     game_status = f"#{away_abbr}vs{home_abbr} {away_score}:{home_score} on {date}"
 
     if API.search(f"from:{API.me().screen_name} '{game_status}'"):
@@ -67,6 +61,16 @@ def tweet_game(date, away_team, home_team, injury_report):
         return
 
     # Game stats
+    play_by_play = get_pbp(date, away_abbr, home_abbr)
+    play_by_play.columns = [
+        "quarter",
+        "time_remaining",
+        "away_action",
+        "home_action",
+        "away_score",
+        "home_score",
+    ]
+
     game_status += "\nTies: {}\n".format(
         play_by_play.drop_duplicates(subset=["away_score", "home_score"])
         .query("away_score > 0")
@@ -275,4 +279,4 @@ if __name__ == "__main__":
 
     injury_report = get_injury_report()
     for game in games.itertuples():
-        tweet_game(game.DATE.date(), game.VISITOR, game.HOME, injury_report)
+        tweet_game(game, injury_report)
