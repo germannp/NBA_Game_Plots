@@ -207,7 +207,8 @@ def tweet_game(game, injury_report):
             shots.query(f"TEAM == '{away_abbr}' and MAKE_MISS == '{make_miss}'")["y"],
             shots.query(f"TEAM == '{away_abbr}' and MAKE_MISS == '{make_miss}'")["x"],
             marker=marker,
-            c=blue,
+            ec=blue,
+            fc="none"
         )
         plt.scatter(
             94
@@ -215,7 +216,8 @@ def tweet_game(game, injury_report):
             50
             - shots.query(f"TEAM == '{home_abbr}' and MAKE_MISS == '{make_miss}'")["x"],
             marker=marker,
-            c=red,
+            ec=red,
+            fc="none"
         )
 
     plt.gca().add_artist(Circle((47, 25), 6, fc="none", ec="k", lw=1))
