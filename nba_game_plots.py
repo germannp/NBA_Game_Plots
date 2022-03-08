@@ -152,30 +152,34 @@ def tweet_game(game, injury_report):
     api_reply = API.update_status(game_status[:279], media_ids=[media.media_id])
 
     # Team stats
-    box_scores = get_box_scores(date, away_abbr, home_abbr)
-    away_totals = box_scores[away_abbr].iloc[-1]
-    home_totals = box_scores[home_abbr].iloc[-1]
-    teams_status = ""
-    for stat in ["FG", "3P", "FT"]:
-        teams_status += "{}: {} of {} / {} of {}\n".format(
-            stat,
-            away_totals[stat],
-            away_totals[stat + "A"],
-            home_totals[stat],
-            home_totals[stat + "A"],
+    try:
+        box_scores = get_box_scores(date, away_abbr, home_abbr)
+        away_totals = box_scores[away_abbr].iloc[-1]
+        home_totals = box_scores[home_abbr].iloc[-1]
+        teams_status = ""
+        for stat in ["FG", "3P", "FT"]:
+            teams_status += "{}: {} of {} / {} of {}\n".format(
+                stat,
+                away_totals[stat],
+                away_totals[stat + "A"],
+                home_totals[stat],
+                home_totals[stat + "A"],
+            )
+        teams_status += "DRB: {} of {} / {} of {}\n".format(
+            away_totals["DRB"],
+            int(away_totals["DRB"]) + int(away_totals["ORB"]),
+            home_totals["DRB"],
+            int(home_totals["DRB"]) + int(home_totals["ORB"]),
         )
-    teams_status += "DRB: {} of {} / {} of {}\n".format(
-        away_totals["DRB"],
-        int(away_totals["DRB"]) + int(away_totals["ORB"]),
-        home_totals["DRB"],
-        int(home_totals["DRB"]) + int(home_totals["ORB"]),
-    )
-    for stat in ["AST", "STL", "BLK", "TOV", "PF"]:
-        teams_status += "{}: {} / {}\n".format(
-            stat,
-            away_totals[stat],
-            home_totals[stat],
-        )
+        for stat in ["AST", "STL", "BLK", "TOV", "PF"]:
+            teams_status += "{}: {} / {}\n".format(
+                stat,
+                away_totals[stat],
+                home_totals[stat],
+            )
+    except ValueError:
+        box_scores = None
+        teams_status = "Sorry, no box scores for this game 🤷"
 
     # Plot shot chart
     shots = get_shot_chart(date, away_abbr, home_abbr)
@@ -254,36 +258,38 @@ def tweet_game(game, injury_report):
     )
 
     # Best individual stats
-    stats = ["PTS", "TRB", "AST", "STL", "BLK"]
-    box_scores = (
-        pd.concat(box_scores.values())
-        .query("PLAYER != 'Team Totals'")
-        .set_index("PLAYER")
-    )
-    box_scores = box_scores[~box_scores["MP"].str.contains("Not")].astype(
-        {stat: int for stat in stats}
-    )
-
     def shorten(name):
         first, *last = name.split(" ")
         if len(first) > 2 and any(c for c in first if c.islower()):
             first = first[0] + "."
         return " ".join([first] + last)
 
-    players_status = ""
-    for stat in stats:
-        players_status += (
-            f"{stat}: "
-            + ", ".join(
-                box_scores.sort_values(stat, ascending=False)
-                .iloc[:3]
-                .apply(lambda player: f"{shorten(player.name)} {player[stat]}", axis=1)
-            )
-            + "\n"
+
+    if box_scores:
+        stats = ["PTS", "TRB", "AST", "STL", "BLK"]
+        box_scores = (
+            pd.concat(box_scores.values())
+            .query("PLAYER != 'Team Totals'")
+            .set_index("PLAYER")
         )
-    api_reply = API.update_status(
-        players_status[:279], in_reply_to_status_id=api_reply.id_str
-    )
+        box_scores = box_scores[~box_scores["MP"].str.contains("Not")].astype(
+            {stat: int for stat in stats}
+        )
+
+        players_status = ""
+        for stat in stats:
+            players_status += (
+                f"{stat}: "
+                + ", ".join(
+                    box_scores.sort_values(stat, ascending=False)
+                    .iloc[:3]
+                    .apply(lambda player: f"{shorten(player.name)} {player[stat]}", axis=1)
+                )
+                + "\n"
+            )
+        api_reply = API.update_status(
+            players_status[:279], in_reply_to_status_id=api_reply.id_str
+        )
 
     # Injury report
     injury_stati = []
