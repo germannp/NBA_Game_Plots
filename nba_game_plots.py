@@ -44,6 +44,16 @@ auth = tweepy.OAuthHandler(API_KEY, API_SECRET_KEY)
 auth.set_access_token(ACCESS_TOKEN, ACCESS_TOKEN_SECRET)
 API = tweepy.API(auth)
 
+blue = "#1d428a"
+red = "#c8102e"
+
+
+def shorten(name):
+    first, *last = name.split(" ")
+    if len(first) > 2 and any(c for c in first if c.islower()):
+        first = first[0] + "."
+    return " ".join([first] + last)
+
 
 def tweet_game(game, injury_report):
     # Title
@@ -118,8 +128,8 @@ def tweet_game(game, injury_report):
     # Plot scores over time
     plt.figure(figsize=[5.05, 2.85])
     for team, score, score_column, color in [
-        (away_team, away_score, "away_score", blue := "#1d428a"),
-        (home_team, home_score, "home_score", red := "#c8102e"),
+        (away_team, away_score, "away_score", blue),
+        (home_team, home_score, "home_score", red),
     ]:
         plt.plot(
             play_by_play["time"],
@@ -258,13 +268,6 @@ def tweet_game(game, injury_report):
     )
 
     # Best individual stats
-    def shorten(name):
-        first, *last = name.split(" ")
-        if len(first) > 2 and any(c for c in first if c.islower()):
-            first = first[0] + "."
-        return " ".join([first] + last)
-
-
     if box_scores:
         stats = ["PTS", "TRB", "AST", "STL", "BLK"]
         box_scores = (
