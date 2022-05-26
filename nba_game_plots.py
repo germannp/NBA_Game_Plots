@@ -208,7 +208,9 @@ def tweet_game(game, injury_report):
         shots["x"] = shots["x"] / (right_corner - left_corner) * 44
         shots["x"] = shots["x"] + 3
     behind_ark = shots.query("VALUE == 3 and y > 14")
-    min_dist = np.sqrt((behind_ark["x"] - 25)**2 + (behind_ark["y"] - 5.25)**2).min()
+    min_dist = np.sqrt(
+        (behind_ark["x"] - 25) ** 2 + (behind_ark["y"] - 5.25) ** 2
+    ).min()
     shots["y"] = shots["y"] / min_dist * 23.75
 
     plt.figure(figsize=[5.05, 2.85])
@@ -222,7 +224,7 @@ def tweet_game(game, injury_report):
             shots.query(f"TEAM == '{away_abbr}' and MAKE_MISS == '{make_miss}'")["x"],
             marker=marker,
             ec=blue,
-            fc="none"
+            fc="none",
         )
         plt.scatter(
             94
@@ -231,7 +233,7 @@ def tweet_game(game, injury_report):
             - shots.query(f"TEAM == '{home_abbr}' and MAKE_MISS == '{make_miss}'")["x"],
             marker=marker,
             ec=red,
-            fc="none"
+            fc="none",
         )
 
     plt.gca().add_artist(Circle((47, 25), 6, fc="none", ec="k", lw=1))
@@ -275,9 +277,10 @@ def tweet_game(game, injury_report):
             .query("PLAYER != 'Team Totals'")
             .set_index("PLAYER")
         )
-        box_scores = box_scores[~box_scores["MP"].str.contains("Not")].astype(
-            {stat: int for stat in stats}
-        )
+        box_scores = box_scores[
+            ~box_scores["MP"].str.contains("Not")
+            & ~box_scores["MP"].str.contains("Suspended")
+        ].astype({stat: int for stat in stats})
 
         players_status = ""
         for stat in stats:
@@ -286,7 +289,9 @@ def tweet_game(game, injury_report):
                 + ", ".join(
                     box_scores.sort_values(stat, ascending=False)
                     .iloc[:3]
-                    .apply(lambda player: f"{shorten(player.name)} {player[stat]}", axis=1)
+                    .apply(
+                        lambda player: f"{shorten(player.name)} {player[stat]}", axis=1
+                    )
                 )
                 + "\n"
             )
