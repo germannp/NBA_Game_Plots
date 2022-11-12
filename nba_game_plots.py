@@ -11,6 +11,7 @@ Options:
   -h --help         Show this screen.
 """
 from itertools import product
+from time import sleep
 
 from docopt import docopt
 import matplotlib.pyplot as plt
@@ -74,6 +75,8 @@ def tweet_game(game, injury_report):
 
     # Game stats
     play_by_play = get_pbp(date, away_abbr, home_abbr)
+    sleep(6)  # Basketball Reference now limits scrapping to 20 calls per minute.
+
     play_by_play.columns = [
         "quarter",
         "time_remaining",
@@ -164,6 +167,8 @@ def tweet_game(game, injury_report):
     # Team stats
     try:
         box_scores = get_box_scores(date, away_abbr, home_abbr)
+        sleep(9)
+
         away_totals = box_scores[away_abbr].iloc[-1]
         home_totals = box_scores[home_abbr].iloc[-1]
         teams_status = ""
@@ -193,6 +198,8 @@ def tweet_game(game, injury_report):
 
     # Plot shot chart
     shots = get_shot_chart(date, away_abbr, home_abbr)
+    sleep(6)
+
     shots[away_abbr]["TEAM"] = away_abbr
     shots[home_abbr]["TEAM"] = home_abbr
     shots = shots[away_abbr].append(shots[home_abbr])
@@ -354,6 +361,8 @@ if __name__ == "__main__":
     for year, playoffs in product([date.year, date.year + 1], [False, True]):
         try:
             schedule = schedule.append(get_schedule(year, playoffs=playoffs).dropna())
+            sleep(30)
+
         except ValueError:
             break  # No schedule available yet
 
@@ -367,5 +376,7 @@ if __name__ == "__main__":
         exit()
 
     injury_report = get_injury_report()
+    sleep(3)
+
     for game in games.itertuples():
         tweet_game(game, injury_report)
